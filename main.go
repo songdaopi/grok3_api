@@ -22,7 +22,6 @@ import (
 // It encapsulates the API endpoints, HTTP headers, and configuration flags.
 type GrokClient struct {
 	newUrl         string            // Endpoint for creating new conversations
-	deleteUrl      string            // Endpoint template for deleting conversations
 	headers        map[string]string // HTTP headers for API requests
 	isReasoning    bool              // Flag for using reasoning model
 	keepChat       bool              // Flag to preserve chat history
@@ -32,8 +31,7 @@ type GrokClient struct {
 // NewGrokClient creates a new instance of GrokClient with the provided cookies and configuration flags.
 func NewGrokClient(cookies string, isReasoning bool, keepChat bool, ignoreThinking bool) *GrokClient {
 	return &GrokClient{
-		newUrl:    "https://grok.com/rest/app-chat/conversations/new",
-		deleteUrl: "https://grok.com/rest/app-chat/conversations/%s",
+		newUrl: "https://grok.com/rest/app-chat/conversations/new",
 		headers: map[string]string{
 			"accept":             "*/*",
 			"accept-language":    "en-GB,en;q=0.9",
@@ -77,7 +75,7 @@ func (c *GrokClient) preparePayload(message string, isReasoning bool) map[string
 		"returnImageBytes":          false,
 		"returnRawGrokInXaiRequest": false,
 		"sendFinalMetadata":         true,
-		"temporary":                 false,
+		"temporary":                 !c.keepChat,
 		"toolOverrides":             map[string]any{},
 	}
 }
@@ -115,15 +113,6 @@ type ResponseToken struct {
 			Token      string `json:"token"`
 			IsThinking bool   `json:"isThinking"`
 		} `json:"response"`
-	} `json:"result"`
-}
-
-// ResponseConversationId contains the conversation ID from a Grok 3 response.
-type ResponseConversationId struct {
-	Result struct {
-		Conversation struct {
-			ConversationId string `json:"conversationId"`
-		} `json:"conversation"`
 	} `json:"result"`
 }
 
@@ -200,33 +189,6 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 		}
 		return io.NopCloser(bytes.NewReader(body)), nil
 	}
-}
-
-// deleteConversation removes the specified conversation from Grok 3 using the provided conversation ID.
-func (c *GrokClient) deleteConversation(conversationId string) error {
-	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf(c.deleteUrl, conversationId), nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
-	}
-
-	for key, value := range c.headers {
-		req.Header.Set(key, value)
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("the Grok API error: %d %s", resp.StatusCode, resp.Status)
-	}
-	defer resp.Body.Close()
-	_, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err)
-	}
-
-	return nil
 }
 
 // OpenAIChatCompletionChunk represents the streaming response format for OpenAI.
@@ -316,7 +278,6 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 		// Read and process the streaming response from Grok 3
 		isThinking := false
 		buffer := make([]byte, 1024)
-		var conversationId string
 		for {
 			n, err := grokStream.Read(buffer)
 			if err != nil {
@@ -333,14 +294,6 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 				line = strings.TrimSpace(line)
 				if line == "" {
 					continue
-				}
-
-				// Extract conversation ID if needed for deletion
-				if !c.keepChat && conversationId == "" {
-					var respConversation ResponseConversationId
-					if err := json.Unmarshal([]byte(line), &respConversation); err == nil {
-						conversationId = respConversation.Result.Conversation.ConversationId
-					}
 				}
 
 				var token ResponseToken
@@ -426,14 +379,6 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 		fmt.Fprintf(w, "data: [DONE]\n\n")
 		flusher.Flush()
 
-		// Delete the conversation if not keeping it
-		if !c.keepChat && conversationId != "" {
-			if err := c.deleteConversation(conversationId); err != nil {
-				log.Printf("Deleting conversation error: %v", err)
-				http.Error(w, fmt.Sprintf("Deleting conversation error: %v", err), http.StatusInternalServerError)
-				return
-			}
-		}
 	}
 }
 
@@ -450,20 +395,12 @@ func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFu
 			return
 		}
 
-		var conversationId string
 		isThinking := false
 		lines := strings.SplitSeq(buf.String(), "\n")
 		for line := range lines {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
-			}
-
-			if !c.keepChat && conversationId == "" {
-				var respConversation ResponseConversationId
-				if err := json.Unmarshal([]byte(line), &respConversation); err == nil {
-					conversationId = respConversation.Result.Conversation.ConversationId
-				}
 			}
 
 			var token ResponseToken
@@ -493,15 +430,6 @@ func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFu
 			log.Printf("Encoding response error: %v", err)
 			http.Error(w, fmt.Sprintf("Encoding response error: %v", err), http.StatusInternalServerError)
 			return
-		}
-
-		// Delete the conversation if not keeping it
-		if !c.keepChat && conversationId != "" {
-			if err := c.deleteConversation(conversationId); err != nil {
-				log.Printf("Deleting conversation error: %v", err)
-				http.Error(w, fmt.Sprintf("Deleting conversation error: %v", err), http.StatusInternalServerError)
-				return
-			}
 		}
 	}
 }

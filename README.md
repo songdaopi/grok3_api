@@ -27,8 +27,8 @@ You can configure the client using command-line flags or environment variables.
 - `-token`: API authentication token (**required**).
 - `-cookie`: Grok cookie(s) for authentication. Accepts a single cookie or a JSON array of cookies.
 - `-textBeforePrompt`: Text to add before the user’s message. The default text can be viewed by using the `-help` flag.
-- `-textAfterPrompt`: Text to add after the user’s message.
-- `-keepChat`: Retains chat conversations after each request if set. Otherwise deleting all chat conversations.
+- `-textAfterPrompt`: Text to add after the user’s message (default: empty string).
+- `-keepChat`: Retains chat conversations after each request if set.
 - `-ignoreThinking`: Excludes thinking tokens from responses when using the reasoning model.
 - `-httpProxy`: Specifies an HTTP or SOCKS5 proxy URL. The proxy URL should be something like `http://127.0.0.1:1080` or `socks5://127.0.0.1:1080`.
 - `-port`: Sets the server port (default: 8180).
@@ -64,15 +64,15 @@ Request body (JSON):
   "grokCookies": ["cookie1", "cookie2"], // a string for a single cookie, or a list of strings for multiple cookies.
   "cookieIndex": 1, // the index of cookie (starting from 1) to request Grok 3 Web API. If the index is 0, auto selecting cookies in turn (defalut behaviour).
   "textBeforePrompt": "System: You are a helpful assistant.", // text to add before the user’s message. The default text can be viewed by using the `-help` flag.
-  "textAfterPrompt": "End of message.", // text to add after the user’s message.
-  "keepChat": 1, // 1 to retain this chat conversation, 0 to auto delete it (defalut behaviour).
+  "textAfterPrompt": "End of message.", // text to add after the user’s message (default: empty string).
+  "keepChat": 1, // 1 to retain this chat conversation, 0 to not retain it (defalut behaviour).
   "ignoreThinking": 1 // 1 to exclude thinking tokens from the response when using the reasoning model, 0 to retain thinking tokens (defalut behaviour).
 }
 ```
 
 ## Warnings
 
-This tool offers the unofficial OpenAI-compatible API of Grok 3, so your account may be **banned** by xAI if using this tool.
+This tool offers an unofficial OpenAI-compatible API of Grok 3, so your account may be **banned** by xAI if using this tool.
 
 Please do not abuse this tool. Use it at your own risk.
 
@@ -80,4 +80,4 @@ Please do not abuse this tool. Use it at your own risk.
 
 - [mem0ai/grok3-api: Unofficial Grok 3 API](https://github.com/mem0ai/grok3-api)
 - [RoCry/grok3-api-cf: Grok 3 via API with Cloudflare for free](https://github.com/RoCry/grok3-api-cf/tree/master)
-- Most code is written by Grok 3, so thanks to Grok 3.
+- Most code was written by Grok 3, so thanks to Grok 3.
