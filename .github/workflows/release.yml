@@ -3,7 +3,7 @@ name: Create release on new tag
 on:
   push:
     tags:
-      - "v*"
+      - "*"
 
 jobs:
   build:
