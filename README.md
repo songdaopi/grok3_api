@@ -69,6 +69,7 @@ Request body (JSON):
   "ignoreThinking": 1 // 1 to exclude thinking tokens from the response when using the reasoning model, 0 to retain thinking tokens (defalut behaviour).
 }
 ```
+## Docker
 
 ## Warnings
 
