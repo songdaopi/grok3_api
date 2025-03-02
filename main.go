@@ -18,17 +18,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// GrokClient 定义了与 Grok3 API 交互的客户端
+// GrokClient defines a client for interacting with the Grok3 Web API.
+// It encapsulates the API endpoints, HTTP headers, and configuration flags.
 type GrokClient struct {
-	newUrl         string
-	deleteUrl      string
-	headers        map[string]string
-	isReasoning    bool
-	keepChat       bool
-	ignoreThinking bool
+	newUrl         string            // Endpoint for creating new conversations
+	deleteUrl      string            // Endpoint template for deleting conversations
+	headers        map[string]string // HTTP headers for API requests
+	isReasoning    bool              // Flag for using reasoning model
+	keepChat       bool              // Flag to preserve chat history
+	ignoreThinking bool              // Flag to exclude thinking tokens in responses
 }
 
-// NewGrokClient 创建一个新的 GrokClient 实例
+// NewGrokClient creates a new instance of GrokClient with the provided cookies and configuration flags.
 func NewGrokClient(cookies string, isReasoning bool, keepChat bool, ignoreThinking bool) *GrokClient {
 	return &GrokClient{
 		newUrl:    "https://grok.com/rest/app-chat/conversations/new",
@@ -56,7 +57,7 @@ func NewGrokClient(cookies string, isReasoning bool, keepChat bool, ignoreThinki
 	}
 }
 
-// preparePayload 准备发送到 Grok3 API 的请求体
+// preparePayload constructs the request payload for the Grok3 Web API based on the given message and reasoning flag.
 func (c *GrokClient) preparePayload(message string, isReasoning bool) map[string]any {
 	return map[string]any{
 		"customInstructions":        "",
@@ -81,7 +82,7 @@ func (c *GrokClient) preparePayload(message string, isReasoning bool) map[string
 	}
 }
 
-// getModelName returns the model name.
+// getModelName returns the appropriate model name based on the isReasoning flag.
 func (c *GrokClient) getModelName() string {
 	if c.isReasoning {
 		return grok3ReasoningModelName
@@ -90,6 +91,8 @@ func (c *GrokClient) getModelName() string {
 	}
 }
 
+// RequestBody represents the structure of the JSON body expected in POST requests to the /v1/chat/completions endpoint,
+// following the OpenAI API format. It includes fields for model selection, messages, streaming option, and additional Grok3-specific options.
 type RequestBody struct {
 	Model    string `json:"model"`
 	Messages []struct {
@@ -97,14 +100,15 @@ type RequestBody struct {
 		Content string `json:"content"`
 	} `json:"messages"`
 	Stream           bool   `json:"stream"`
-	Grok3Cookies     any    `json:"grok3Cookies,omitempty"`
-	CookieIndex      uint   `json:"cookieIndex,omitempty"` // start from 1, 0 is auto(selecting cookies in turn)
+	GrokCookies      any    `json:"grokCookies,omitempty"` // A single cookie(string), or a list of cookie([]string)
+	CookieIndex      uint   `json:"cookieIndex,omitempty"` // Start from 1, 0 means auto-select cookies in turn
 	TextBeforePrompt string `json:"textBeforePrompt,omitempty"`
 	TextAfterPrompt  string `json:"textAfterPrompt,omitempty"`
 	KeepChat         int    `json:"keepChat,omitempty"`       // > 0 is true, == 0 is false
 	IgnoreThinking   int    `json:"ignoreThinking,omitempty"` // > 0 is true, == 0 is false
 }
 
+// ResponseToken represents a single token response from the Grok3 Web API.
 type ResponseToken struct {
 	Result struct {
 		Response struct {
@@ -114,6 +118,7 @@ type ResponseToken struct {
 	} `json:"result"`
 }
 
+// ResponseConversationId contains the conversation ID from a Grok3 response.
 type ResponseConversationId struct {
 	Result struct {
 		Conversation struct {
@@ -122,37 +127,45 @@ type ResponseConversationId struct {
 	} `json:"result"`
 }
 
+// ModelData represents model metadata for OpenAI-compatible response.
 type ModelData struct {
 	Id       string `json:"id"`
 	Object   string `json:"object"`
 	Owned_by string `json:"owned_by"`
 }
 
+// ModelList contains available models for OpenAI-compatible endpoint.
 type ModelList struct {
 	Object string      `json:"object"`
 	Data   []ModelData `json:"data"`
 }
 
-const grok3ModelName = "grok-3"
-const grok3ReasoningModelName = "grok-3-reasoning"
+const (
+	grok3ModelName          = "grok-3"
+	grok3ReasoningModelName = "grok-3-reasoning"
 
-const completionsPath = "/v1/chat/completions"
-const listModelsPath = "/v1/models"
+	completionsPath = "/v1/chat/completions"
+	listModelsPath  = "/v1/models"
+)
 
-var grok3Token *string
-var grok3Cookies []string
-var keepChat *bool
-var textBeforePrompt *string
-var textAfterPrompt *string
-var ignoreThinking *bool
-var httpProxy *string
-var httpClient = &http.Client{}
-var nextCookieIndex = struct {
-	sync.Mutex
-	index uint // start from 0
-}{}
+// Global configuration variables set.
+var (
+	apiToken         *string
+	grokCookies      []string
+	textBeforePrompt *string
+	textAfterPrompt  *string
+	keepChat         *bool
+	ignoreThinking   *bool
+	httpProxy        *string
+	httpClient       = &http.Client{}
+	nextCookieIndex  = struct { // Thread-safe cookie rotation
+		sync.Mutex
+		index uint // Start from 0
+	}{}
+)
 
-// sendMessage 发送消息到 Grok3 API 并返回响应
+// sendMessage sends a message to the Grok3 Web API and returns the response body as an io.ReadCloser.
+// If stream is true, it returns the streaming response; otherwise, it reads the entire response.
 func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, error) {
 	payload := c.preparePayload(message, c.isReasoning)
 	jsonPayload, err := json.Marshal(payload)
@@ -189,7 +202,7 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 	}
 }
 
-// deleteConversation 删除整个对话
+// deleteConversation removes the specified conversation from Grok3 using the provided conversation ID.
 func (c *GrokClient) deleteConversation(conversationId string) error {
 	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf(c.deleteUrl, conversationId), nil)
 	if err != nil {
@@ -216,7 +229,7 @@ func (c *GrokClient) deleteConversation(conversationId string) error {
 	return nil
 }
 
-// OpenAIChatCompletionChunk 定义了 OpenAI 兼容的流式响应块
+// OpenAIChatCompletionChunk represents the streaming response format for OpenAI.
 type OpenAIChatCompletionChunk struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -232,7 +245,7 @@ type OpenAIChatCompletionChunk struct {
 	} `json:"choices"`
 }
 
-// OpenAIChatCompletion 定义了 OpenAI 兼容的完整响应
+// OpenAIChatCompletion represents the non-streaming response format for OpenAI.
 type OpenAIChatCompletion struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -253,9 +266,11 @@ type OpenAIChatCompletion struct {
 	} `json:"usage"`
 }
 
-// createOpenAIStreamingResponse 处理流式响应并转换为 OpenAI 格式
+// createOpenAIStreamingResponse returns an HTTP handler that converts the Grok3 streaming response to OpenAI's streaming format
+// and writes it to the response writer.
 func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Set up headers for streaming response
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -269,7 +284,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 
 		completionID := "chatcmpl-" + uuid.New().String()
 
-		// 发送起始块
+		// Create and send the initial chunk
 		startChunk := OpenAIChatCompletionChunk{
 			ID:      completionID,
 			Object:  "chat.completion.chunk",
@@ -298,7 +313,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 		fmt.Fprintf(w, "data: %s\n\n", mustMarshal(startChunk))
 		flusher.Flush()
 
-		// 处理流式数据
+		// Read and process the streaming response from Grok3
 		isThinking := false
 		buffer := make([]byte, 1024)
 		var conversationId string
@@ -320,6 +335,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 					continue
 				}
 
+				// Extract conversation ID if needed for deletion
 				if !c.keepChat && conversationId == "" {
 					var respConversation ResponseConversationId
 					if err := json.Unmarshal([]byte(line), &respConversation); err == nil {
@@ -333,6 +349,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 				}
 
 				respToken := token.Result.Response.Token
+				// Handle thinking tokens based on configuration
 				if c.ignoreThinking && token.Result.Response.IsThinking {
 					continue
 				} else if token.Result.Response.IsThinking {
@@ -346,6 +363,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 				}
 
 				if respToken != "" {
+					// Send token as a chunk in OpenAI format
 					chunk := OpenAIChatCompletionChunk{
 						ID:      completionID,
 						Object:  "chat.completion.chunk",
@@ -377,7 +395,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 			}
 		}
 
-		// 发送结束块
+		// Send the final chunk after streaming ends
 		finalChunk := OpenAIChatCompletionChunk{
 			ID:      completionID,
 			Object:  "chat.completion.chunk",
@@ -404,11 +422,11 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 		fmt.Fprintf(w, "data: %s\n\n", mustMarshal(finalChunk))
 		flusher.Flush()
 
-		// 结束流
+		// Finish the stream
 		fmt.Fprintf(w, "data: [DONE]\n\n")
 		flusher.Flush()
 
-		// 删除对话
+		// Delete the conversation if not keeping it
 		if !c.keepChat && conversationId != "" {
 			if err := c.deleteConversation(conversationId); err != nil {
 				log.Printf("Deleting conversation error: %v", err)
@@ -419,7 +437,8 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 	}
 }
 
-// createOpenAIFullResponse 处理包含全部内容的响应并转换为 OpenAI 格式
+// createOpenAIFullResponse returns an HTTP handler that reads the full Grok3 response, converts it to OpenAI's format,
+// and writes it to the response writer.
 func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var fullResponse strings.Builder
@@ -476,6 +495,7 @@ func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFu
 			return
 		}
 
+		// Delete the conversation if not keeping it
 		if !c.keepChat && conversationId != "" {
 			if err := c.deleteConversation(conversationId); err != nil {
 				log.Printf("Deleting conversation error: %v", err)
@@ -486,7 +506,7 @@ func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFu
 	}
 }
 
-// createOpenAIFullResponseBody 创建 OpenAI 兼容的完整响应
+// createOpenAIFullResponseBody creates the OpenAI response body for non-streaming requests.
 func (c *GrokClient) createOpenAIFullResponseBody(content string) OpenAIChatCompletion {
 	return OpenAIChatCompletion{
 		ID:      "chatcmpl-" + uuid.New().String(),
@@ -525,7 +545,7 @@ func (c *GrokClient) createOpenAIFullResponseBody(content string) OpenAIChatComp
 	}
 }
 
-// mustMarshal 将对象序列化为 JSON 字符串
+// mustMarshal serializes the given value to a JSON string, panicking on error.
 func mustMarshal(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -534,7 +554,8 @@ func mustMarshal(v any) string {
 	return string(b)
 }
 
-// getCookieIndex 获取 cookie 的 index（从 1 算起）, len 要大于 0
+// getCookieIndex selects the next cookie index in a round-robin fashion for load balancing or rotation.
+// If cookieIndex is 0 or out of range, it uses the next index in sequence (len must be > 0).
 func getCookieIndex(len int, cookieIndex uint) uint {
 	if cookieIndex == 0 || cookieIndex > uint(len) {
 		nextCookieIndex.Lock()
@@ -548,8 +569,12 @@ func getCookieIndex(len int, cookieIndex uint) uint {
 	}
 }
 
-// handleRequest handles HTTP requests.
-func handleRequest(w http.ResponseWriter, r *http.Request) {
+// handleChatCompletion handles incoming POST requests to /v1/chat/completions, authenticates the request,
+// parses the request body, interacts with the Grok3 API, and sends the response in OpenAI's format.
+func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
+	// Log the request details
+	log.Printf("Request from %s for %s", r.RemoteAddr, completionsPath)
+
 	if r.URL.Path != completionsPath {
 		log.Printf("Requested Path %s Not Found", r.URL.Path)
 		http.Error(w, "Requested Path Not Found", http.StatusNotFound)
@@ -562,7 +587,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证身份
+	// Authenticate the request
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		log.Println("Unauthorized: Bearer token required")
@@ -571,13 +596,13 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-	if token != *grok3Token {
+	if token != *apiToken {
 		log.Println("Unauthorized: Invalid token")
 		http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
 		return
 	}
 
-	// 解析请求体
+	// Parse the request body
 	body := RequestBody{KeepChat: -1, IgnoreThinking: -1}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		log.Println("Bad Request: Invalid JSON")
@@ -585,21 +610,25 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Select the appropriate cookie
 	var cookie string
-	if body.Grok3Cookies != nil {
-		if ck, ok := body.Grok3Cookies.(string); ok {
+	var cookieIndex uint
+	if body.GrokCookies != nil {
+		if ck, ok := body.GrokCookies.(string); ok {
 			cookie = ck
-		} else if list, ok := body.Grok3Cookies.([]any); ok {
+		} else if list, ok := body.GrokCookies.([]any); ok {
 			if len(list) > 0 {
-				if ck, ok := list[getCookieIndex(len(list), body.CookieIndex)].(string); ok {
+				cookieIndex = getCookieIndex(len(list), body.CookieIndex)
+				if ck, ok := list[cookieIndex].(string); ok {
 					cookie = ck
 				}
 			}
 		}
 	}
 	cookie = strings.TrimSpace(cookie)
-	if cookie == "" && len(grok3Cookies) > 0 {
-		cookie = grok3Cookies[getCookieIndex(len(grok3Cookies), body.CookieIndex)]
+	if cookie == "" && len(grokCookies) > 0 {
+		cookieIndex = getCookieIndex(len(grokCookies), body.CookieIndex)
+		cookie = grokCookies[cookieIndex]
 	}
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
@@ -615,7 +644,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 提取消息
+	// Construct the message to send to Grok3
 	msg, err := json.Marshal(messages)
 	if err != nil {
 		log.Println("Bad Request: No messages provided")
@@ -642,6 +671,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	message := beforePromptText + string(msg) + afterPromptText
 
+	// Determine configuration flags
 	isReasoning := false
 	if strings.TrimSpace(body.Model) == grok3ReasoningModelName {
 		isReasoning = true
@@ -661,8 +691,10 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		ignoreThink = *ignoreThinking
 	}
 
-	// 初始化 GrokClient
+	// Initialize GrokClient with selected options
 	grokClient := NewGrokClient(cookie, isReasoning, keepConversation, ignoreThink)
+	log.Printf("Use the cookie of index %d to request Grok3 Web API", cookieIndex+1)
+	// Send the message to Grok3 Web API
 	respReader, err := grokClient.sendMessage(message, body.Stream)
 	if err != nil {
 		log.Printf("Error: %v", err)
@@ -671,17 +703,19 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer respReader.Close()
 
+	// Handle the response based on streaming option
 	if body.Stream {
-		// 处理流式响应
 		grokClient.createOpenAIStreamingResponse(respReader)(w, r)
 	} else {
-		// 处理完整响应
 		grokClient.createOpenAIFullResponse(respReader)(w, r)
 	}
 }
 
-// listModels lists all models.
+// listModels handles GET requests to /v1/models, returning a list of available models in OpenAI's format.
 func listModels(w http.ResponseWriter, r *http.Request) {
+	// Log the request details
+	log.Printf("Request from %s for %s", r.RemoteAddr, listModelsPath)
+
 	if r.URL.Path != listModelsPath {
 		log.Printf("Requested Path %s Not Found", r.URL.Path)
 		http.Error(w, "Requested Path Not Found", http.StatusNotFound)
@@ -718,41 +752,46 @@ func listModels(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// main 启动 HTTP 服务器
+// main parses command-line flags, sets up the HTTP server, and starts listening for requests.
 func main() {
-	grok3Token = flag.String("token", "", "Authentication token (GROK3_AUTH_TOKEN)")
+	// Define command-line flags
+	apiToken = flag.String("token", "", "Authentication token (GROK3_AUTH_TOKEN)")
 	cookie := flag.String("cookie", "", "Grok3 cookie (GROK3_COOKIE)")
-	keepChat = flag.Bool("keepChat", false, "Don't delete the chat after request")
 	textBeforePrompt = flag.String("textBeforePrompt", "For the data below, entries with the role 'system' are system information, entries with the role 'assistant' are messages you have previously sent, entries with the role 'user' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data.", "Text before the prompt")
 	textAfterPrompt = flag.String("textAfterPrompt", "", "Text after the prompt")
+	keepChat = flag.Bool("keepChat", false, "Don't delete the chat conversation after request")
 	ignoreThinking = flag.Bool("ignoreThinking", false, "Ignore the thinking content while using the reasoning model")
 	httpProxy = flag.String("httpProxy", "", "HTTP/SOCKS5 proxy")
 	port := flag.Uint("port", 8180, "Server port")
 	flag.Parse()
 
+	// Validate port number
 	if *port > 65535 {
 		log.Fatalf("Server port %d is greater than 65535", *port)
 	}
 
-	*grok3Token = strings.TrimSpace(*grok3Token)
-	if *grok3Token == "" {
-		*grok3Token = os.Getenv("GROK3_AUTH_TOKEN")
-		if *grok3Token == "" {
-			log.Fatal("未设置 Authentication token (GROK3_AUTH_TOKEN)")
+	// Set authentication token from flag or environment variable
+	*apiToken = strings.TrimSpace(*apiToken)
+	if *apiToken == "" {
+		*apiToken = os.Getenv("GROK3_AUTH_TOKEN")
+		if *apiToken == "" {
+			log.Fatal("Authentication token (GROK3_AUTH_TOKEN) is unset")
 		}
 	}
 
+	// Set cookies from flag or environment variable
 	*cookie = strings.TrimSpace(*cookie)
 	if *cookie == "" {
 		*cookie = strings.TrimSpace(os.Getenv("GROK3_COOKIE"))
 	}
 	if *cookie != "" {
-		err := json.Unmarshal([]byte(*cookie), &grok3Cookies)
+		err := json.Unmarshal([]byte(*cookie), &grokCookies)
 		if err != nil {
-			grok3Cookies = []string{*cookie}
+			grokCookies = []string{*cookie}
 		}
 	}
 
+	// Configure HTTP client with proxy if provided
 	*httpProxy = strings.TrimSpace(*httpProxy)
 	if *httpProxy != "" {
 		proxyURL, err := url.Parse(*httpProxy)
@@ -773,9 +812,11 @@ func main() {
 		}
 	}
 
-	http.HandleFunc(completionsPath, handleRequest)
+	// Register HTTP handlers
+	http.HandleFunc(completionsPath, handleChatCompletion)
 	http.HandleFunc(listModelsPath, listModels)
 	log.Printf("Server starting on :%d", *port)
 
+	// Start the HTTP server
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }
