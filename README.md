@@ -74,7 +74,7 @@ Request body (JSON):
 
 This tool offers an unofficial OpenAI-compatible API of Grok 3, so your account may be **banned** by xAI if using this tool.
 
-Please do not abuse this tool. Use it at your own risk.
+Please do not abuse or use this tool for commercial purposes. Use it at your own risk.
 
 ## Special Thanks
 
