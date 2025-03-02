@@ -573,14 +573,18 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Construct the message to send to Grok 3
-	msg, err := json.Marshal(messages)
+	messageJson := bytes.NewBuffer([]byte{})
+	jsonEncoder := json.NewEncoder(messageJson)
+	jsonEncoder.SetEscapeHTML(false) // don't escape &, <, and >
+	jsonEncoder.SetIndent("", "")
+	err := jsonEncoder.Encode(messages)
 	if err != nil {
-		log.Println("Bad Request: No messages provided")
-		http.Error(w, "Bad Request: No messages provided", http.StatusBadRequest)
+		log.Println("Error: Encoding JSON failed")
+		http.Error(w, "Error: Encoding JSON failed", http.StatusInternalServerError)
 		return
 	}
-	if len(msg) <= 2 {
-		log.Println("Bad Request: No messages provided")
+	if messageJson.Len() <= 2 {
+		log.Println("Bad Request: No user message found")
 		http.Error(w, "Bad Request: No user message found", http.StatusBadRequest)
 		return
 	}
@@ -597,7 +601,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	} else {
 		afterPromptText = *textAfterPrompt
 	}
-	message := beforePromptText + string(msg) + afterPromptText
+	message := beforePromptText + messageJson.String() + afterPromptText
 
 	// Determine configuration flags
 	isReasoning := false
@@ -621,7 +625,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 
 	// Initialize GrokClient with selected options
 	grokClient := NewGrokClient(cookie, isReasoning, keepConversation, ignoreThink)
-	log.Printf("Use the cookie of index %d to request Grok 3 Web API", cookieIndex+1)
+	log.Printf("Use the cookie with index %d to request Grok 3 Web API", cookieIndex+1)
 	// Send the message to Grok 3 Web API
 	respReader, err := grokClient.sendMessage(message, body.Stream)
 	if err != nil {
