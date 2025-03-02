@@ -1,6 +1,6 @@
-# Grok3 Web API Wrapper
+# Grok 3 Web API Wrapper
 
-This is a Go-based tool designed to interact with the Grok3 Web API, offering an OpenAI-compatible endpoint for chat completions. It enables users to send messages to the Grok3 Web API and receive responses in a format consistent with OpenAI's chat completion API.
+This is a Go-based tool designed to interact with the Grok 3 Web API, offering an OpenAI-compatible endpoint for chat completions. It enables users to send messages to the Grok 3 Web API and receive responses in a format consistent with OpenAI's chat completion API.
 
 ## Features
 
@@ -62,7 +62,7 @@ Request body (JSON):
   "model": "grok-3", // "grok-3" for the standard Grok 3 model, "grok-3-reasoning" for the Grok 3 reasoning model.
   "stream": true, // true for streaming response.
   "grokCookies": ["cookie1", "cookie2"], // a string for a single cookie, or a list of strings for multiple cookies.
-  "cookieIndex": 1, // the index of cookie (starting from 1) to request Grok3 Web API. If the index is 0, auto selecting cookies in turn (defalut behaviour).
+  "cookieIndex": 1, // the index of cookie (starting from 1) to request Grok 3 Web API. If the index is 0, auto selecting cookies in turn (defalut behaviour).
   "textBeforePrompt": "System: You are a helpful assistant.", // text to add before the user’s message. The default text can be viewed by using the `-help` flag.
   "textAfterPrompt": "End of message.", // text to add after the user’s message.
   "keepChat": 1, // 1 to retain this chat conversation, 0 to auto delete it (defalut behaviour).
@@ -72,7 +72,7 @@ Request body (JSON):
 
 ## Warnings
 
-This tool offers the unofficial OpenAI-compatible API of Grok3, so your account may be **banned** by xAI if using this tool.
+This tool offers the unofficial OpenAI-compatible API of Grok 3, so your account may be **banned** by xAI if using this tool.
 
 Please do not abuse this tool. Use it at your own risk.
 
