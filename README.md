@@ -15,7 +15,7 @@ This is a Go-based tool designed to interact with the Grok 3 Web API, offering a
 
 Before you use this tool, ensure you have the following:
 
-- **Grok Cookies**: Obtain your account's cookie from [grok.com](https://grok.com) by your browser.
+- **Grok Cookie**: Obtain your account's cookie from [grok.com](https://grok.com) by your browser.
 - **Authentication Token**: Prepare a token to secure the API endpoint.
 
 ## Configuration
