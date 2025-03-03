@@ -18,6 +18,18 @@ Before you use this tool, ensure you have the following:
 - **Grok Cookie**: Obtain your account's cookie from [grok.com](https://grok.com) by your browser.
 - **Authentication Token**: Prepare a token to secure the API endpoint.
 
+## Basic Usage
+
+The API authentication token is **required** while running this tool. The Grok cookie must be set by the `-cookie` flag or the request body.
+
+Run this:
+
+```
+grok3_api -token your_secret_token
+```
+
+Then the OpenAI-compatible API can be accessed through `http://127.0.0.1:8180/v1`.
+
 ## Configuration
 
 You can configure the client using command-line flags or environment variables.
@@ -33,14 +45,6 @@ You can configure the client using command-line flags or environment variables.
 - `-httpProxy`: Specifies an HTTP or SOCKS5 proxy URL. The proxy URL should be something like `http://127.0.0.1:1080` or `socks5://127.0.0.1:1080`.
 - `-port`: Sets the server port (default: 8180).
 - `-help`: Prints the help message.
-
-Basic usage:
-
-The API authentication token is **required** while running this tool. The Grok cookie must be set by the `-cookie` flag or the request body.
-
-```
-grok3_api -token your_secret_token
-```
 
 ### Environment Variables
 
