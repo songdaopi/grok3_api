@@ -1,5 +1,8 @@
 # Grok 3 Web API Wrapper
 
+**Chinese**:**本仓库为原作的docker化版本。**
+鸣谢：[orzogc](https://github.com/orzogc)
+
 This is a Go-based tool designed to interact with the Grok 3 Web API, offering an OpenAI-compatible endpoint for chat completions. It enables users to send messages to the Grok 3 Web API and receive responses in a format consistent with OpenAI's chat completion API.
 
 ## Features
@@ -69,7 +72,6 @@ Request body (JSON):
   "ignoreThinking": 1 // 1 to exclude thinking tokens from the response when using the reasoning model, 0 to retain thinking tokens (defalut behaviour).
 }
 ```
-## Docker
 
 ## Warnings
 
