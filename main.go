@@ -146,7 +146,7 @@ var (
 	keepChat         *bool
 	ignoreThinking   *bool
 	httpProxy        *string
-	httpClient       = &http.Client{}
+	httpClient       = &http.Client{Timeout: 30 * time.Minute}
 	nextCookieIndex  = struct { // Thread-safe cookie rotation
 		sync.Mutex
 		index uint // Start from 0
@@ -176,7 +176,12 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the Grok API error: %d %s", resp.StatusCode, resp.Status)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("the Grok API error: %d %s", resp.StatusCode, resp.Status)
+		}
+		return nil, fmt.Errorf("the Grok API error: %d %s, response body: %s", resp.StatusCode, resp.Status, string(body))
 	}
 
 	if stream {
@@ -191,41 +196,46 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 	}
 }
 
+type OpenAIChatCompletionMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type OpenAIChatCompletionChunkChoice struct {
+	Index        int                         `json:"index"`
+	Delta        OpenAIChatCompletionMessage `json:"delta"`
+	FinishReason string                      `json:"finish_reason"`
+}
+
 // OpenAIChatCompletionChunk represents the streaming response format for OpenAI.
 type OpenAIChatCompletionChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index int `json:"index"`
-		Delta struct {
-			Role    string `json:"role,omitempty"`
-			Content string `json:"content,omitempty"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
+	ID      string                            `json:"id"`
+	Object  string                            `json:"object"`
+	Created int64                             `json:"created"`
+	Model   string                            `json:"model"`
+	Choices []OpenAIChatCompletionChunkChoice `json:"choices"`
+}
+
+type OpenAIChatCompletionChoice struct {
+	Index        int                         `json:"index"`
+	Message      OpenAIChatCompletionMessage `json:"message"`
+	FinishReason string                      `json:"finish_reason"`
+}
+
+type OpenAIChatCompletionUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // OpenAIChatCompletion represents the non-streaming response format for OpenAI.
 type OpenAIChatCompletion struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index   int `json:"index"`
-		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	ID      string                       `json:"id"`
+	Object  string                       `json:"object"`
+	Created int64                        `json:"created"`
+	Model   string                       `json:"model"`
+	Choices []OpenAIChatCompletionChoice `json:"choices"`
+	Usage   OpenAIChatCompletionUsage    `json:"usage"`
 }
 
 // createOpenAIStreamingResponse returns an HTTP handler that converts the Grok 3 streaming response to OpenAI's streaming format
@@ -252,20 +262,10 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 			Object:  "chat.completion.chunk",
 			Created: time.Now().Unix(),
 			Model:   c.getModelName(),
-			Choices: []struct {
-				Index int `json:"index"`
-				Delta struct {
-					Role    string `json:"role,omitempty"`
-					Content string `json:"content,omitempty"`
-				} `json:"delta"`
-				FinishReason string `json:"finish_reason"`
-			}{
+			Choices: []OpenAIChatCompletionChunkChoice{
 				{
 					Index: 0,
-					Delta: struct {
-						Role    string `json:"role,omitempty"`
-						Content string `json:"content,omitempty"`
-					}{
+					Delta: OpenAIChatCompletionMessage{
 						Role: "assistant",
 					},
 					FinishReason: "",
@@ -322,20 +322,10 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 						Object:  "chat.completion.chunk",
 						Created: time.Now().Unix(),
 						Model:   c.getModelName(),
-						Choices: []struct {
-							Index int `json:"index"`
-							Delta struct {
-								Role    string `json:"role,omitempty"`
-								Content string `json:"content,omitempty"`
-							} `json:"delta"`
-							FinishReason string `json:"finish_reason"`
-						}{
+						Choices: []OpenAIChatCompletionChunkChoice{
 							{
 								Index: 0,
-								Delta: struct {
-									Role    string `json:"role,omitempty"`
-									Content string `json:"content,omitempty"`
-								}{
+								Delta: OpenAIChatCompletionMessage{
 									Content: respToken,
 								},
 								FinishReason: "",
@@ -354,20 +344,10 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 			Object:  "chat.completion.chunk",
 			Created: time.Now().Unix(),
 			Model:   c.getModelName(),
-			Choices: []struct {
-				Index int `json:"index"`
-				Delta struct {
-					Role    string `json:"role,omitempty"`
-					Content string `json:"content,omitempty"`
-				} `json:"delta"`
-				FinishReason string `json:"finish_reason"`
-			}{
+			Choices: []OpenAIChatCompletionChunkChoice{
 				{
-					Index: 0,
-					Delta: struct {
-						Role    string `json:"role,omitempty"`
-						Content string `json:"content,omitempty"`
-					}{},
+					Index:        0,
+					Delta:        OpenAIChatCompletionMessage{},
 					FinishReason: "stop",
 				},
 			},
@@ -441,31 +421,17 @@ func (c *GrokClient) createOpenAIFullResponseBody(content string) OpenAIChatComp
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
 		Model:   c.getModelName(),
-		Choices: []struct {
-			Index   int `json:"index"`
-			Message struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		}{
+		Choices: []OpenAIChatCompletionChoice{
 			{
 				Index: 0,
-				Message: struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				}{
+				Message: OpenAIChatCompletionMessage{
 					Role:    "assistant",
 					Content: content,
 				},
 				FinishReason: "stop",
 			},
 		},
-		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		}{
+		Usage: OpenAIChatCompletionUsage{
 			PromptTokens:     -1,
 			CompletionTokens: -1,
 			TotalTokens:      -1,
@@ -575,7 +541,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// Construct the message to send to Grok 3
 	messageJson := bytes.NewBuffer([]byte{})
 	jsonEncoder := json.NewEncoder(messageJson)
-	jsonEncoder.SetEscapeHTML(false) // don't escape &, <, and >
+	jsonEncoder.SetEscapeHTML(false) // Don't escape &, <, and >
 	jsonEncoder.SetIndent("", "")
 	err := jsonEncoder.Encode(messages)
 	if err != nil {
@@ -736,7 +702,7 @@ func main() {
 				}).DialContext,
 				ForceAttemptHTTP2:   true,
 				MaxIdleConns:        10,
-				IdleConnTimeout:     120 * time.Second,
+				IdleConnTimeout:     600 * time.Second,
 				TLSHandshakeTimeout: 20 * time.Second,
 			}
 		} else {
