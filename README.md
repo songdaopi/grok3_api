@@ -1,6 +1,6 @@
 # Grok 3 Web API Wrapper
 
-This is a Go-based tool designed to interact with the Grok 3 Web API, offering an OpenAI-compatible endpoint for chat completions. It enables users to send messages to the Grok 3 Web API and receive responses in a format consistent with OpenAI's chat completion API.
+This is a Go-based tool designed to interact with the Grok 3 Web API, offering an OpenAI-compatible API endpoint for chat completions. It enables users to send messages to the Grok 3 Web API and receive responses in a format consistent with OpenAI's chat completion API.
 
 ## Features
 
@@ -16,7 +16,7 @@ This is a Go-based tool designed to interact with the Grok 3 Web API, offering a
 Before you use this tool, ensure you have the following:
 
 - **Grok Cookie**: Obtain your account's cookie from [grok.com](https://grok.com) by your browser.
-- **Authentication Token**: Prepare a token to secure the API endpoint.
+- **API Authentication Token**: Prepare a token to secure the OpenAI-compatible API endpoints.
 
 ## Basic Usage
 
@@ -28,11 +28,11 @@ Run this:
 grok3_api -token your_secret_token
 ```
 
-Then the OpenAI-compatible API can be accessed through `http://127.0.0.1:8180/v1`.
+Then the OpenAI-compatible API endpoints can be accessed through `http://127.0.0.1:8180/v1`.
 
 ## Configuration
 
-You can configure the client using command-line flags or environment variables.
+You can configure this tool using command-line flags, environment variables or the request body.
 
 ### Command-Line Flags
 
@@ -85,3 +85,7 @@ Please do not abuse or use this tool for commercial purposes. Use it at your own
 - [mem0ai/grok3-api: Unofficial Grok 3 API](https://github.com/mem0ai/grok3-api)
 - [RoCry/grok3-api-cf: Grok 3 via API with Cloudflare for free](https://github.com/RoCry/grok3-api-cf/tree/master)
 - Most code was written by Grok 3, so thanks to Grok 3.
+
+## License
+
+This project is licensed under the `AGPL-3.0` License.
