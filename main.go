@@ -24,12 +24,13 @@ type GrokClient struct {
 	newUrl         string            // Endpoint for creating new conversations
 	headers        map[string]string // HTTP headers for API requests
 	isReasoning    bool              // Flag for using reasoning model
+	enableSearch   bool              // Flag for searching in the Web
 	keepChat       bool              // Flag to preserve chat history
 	ignoreThinking bool              // Flag to exclude thinking tokens in responses
 }
 
 // NewGrokClient creates a new instance of GrokClient with the provided cookies and configuration flags.
-func NewGrokClient(cookies string, isReasoning bool, keepChat bool, ignoreThinking bool) *GrokClient {
+func NewGrokClient(cookie string, isReasoning bool, enableSearch bool, keepChat bool, ignoreThinking bool) *GrokClient {
 	return &GrokClient{
 		newUrl: "https://grok.com/rest/app-chat/conversations/new",
 		headers: map[string]string{
@@ -47,18 +48,32 @@ func NewGrokClient(cookies string, isReasoning bool, keepChat bool, ignoreThinki
 			"sec-fetch-site":     "same-origin",
 			"sec-gpc":            "1",
 			"user-agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-			"cookie":             cookies,
+			"cookie":             cookie,
 		},
 		isReasoning:    isReasoning,
+		enableSearch:   enableSearch,
 		keepChat:       keepChat,
 		ignoreThinking: ignoreThinking,
 	}
 }
 
+type ToolOverrides struct {
+	ImageGen     bool `json:"imageGen"`
+	TrendsSearch bool `json:"trendsSearch"`
+	WebSearch    bool `json:"webSearch"`
+	XMediaSearch bool `json:"xMediaSearch"`
+	XPostAnalyze bool `json:"xPostAnalyze"`
+	XSearch      bool `json:"xSearch"`
+}
+
 // preparePayload constructs the request payload for the Grok 3 Web API based on the given message and reasoning flag.
-func (c *GrokClient) preparePayload(message string, isReasoning bool) map[string]any {
+func (c *GrokClient) preparePayload(message string) map[string]any {
+	var toolOverrides any = ToolOverrides{}
+	if c.enableSearch {
+		toolOverrides = map[string]any{}
+	}
+
 	return map[string]any{
-		"customInstructions":        "",
 		"deepsearchPreset":          "",
 		"disableSearch":             false,
 		"enableImageGeneration":     true,
@@ -69,14 +84,15 @@ func (c *GrokClient) preparePayload(message string, isReasoning bool) map[string
 		"imageAttachments":          []string{},
 		"imageGenerationCount":      2,
 		"isPreset":                  false,
-		"isReasoning":               isReasoning,
+		"isReasoning":               c.isReasoning,
 		"message":                   message,
 		"modelName":                 "grok-3",
 		"returnImageBytes":          false,
 		"returnRawGrokInXaiRequest": false,
 		"sendFinalMetadata":         true,
 		"temporary":                 !c.keepChat,
-		"toolOverrides":             map[string]any{},
+		"toolOverrides":             toolOverrides,
+		"webpageUrls":               []string{},
 	}
 }
 
@@ -98,8 +114,9 @@ type RequestBody struct {
 		Content string `json:"content"`
 	} `json:"messages"`
 	Stream           bool   `json:"stream"`
-	GrokCookies      any    `json:"grokCookies,omitempty"` // A single cookie(string), or a list of cookie([]string)
-	CookieIndex      uint   `json:"cookieIndex,omitempty"` // Start from 1, 0 means auto-select cookies in turn
+	GrokCookies      any    `json:"grokCookies,omitempty"`  // A single cookie(string), or a list of cookie([]string)
+	CookieIndex      uint   `json:"cookieIndex,omitempty"`  // Start from 1, 0 means auto-select cookies in turn
+	EnableSearch     int    `json:"enableSearch,omitempty"` // > 0 is true, == 0 is false
 	TextBeforePrompt string `json:"textBeforePrompt,omitempty"`
 	TextAfterPrompt  string `json:"textAfterPrompt,omitempty"`
 	KeepChat         int    `json:"keepChat,omitempty"`       // > 0 is true, == 0 is false
@@ -156,7 +173,7 @@ var (
 // sendMessage sends a message to the Grok 3 Web API and returns the response body as an io.ReadCloser.
 // If stream is true, it returns the streaming response; otherwise, it reads the entire response.
 func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, error) {
-	payload := c.preparePayload(message, c.isReasoning)
+	payload := c.preparePayload(message)
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %v", err)
@@ -497,7 +514,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse the request body
-	body := RequestBody{KeepChat: -1, IgnoreThinking: -1}
+	body := RequestBody{EnableSearch: -1, KeepChat: -1, IgnoreThinking: -1}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		log.Println("Bad Request: Invalid JSON")
 		http.Error(w, "Bad Request: Invalid JSON", http.StatusBadRequest)
@@ -575,6 +592,11 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		isReasoning = true
 	}
 
+	enableSearch := false
+	if body.EnableSearch > 0 {
+		enableSearch = true
+	}
+
 	keepConversation := false
 	if body.KeepChat > 0 {
 		keepConversation = true
@@ -590,7 +612,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Initialize GrokClient with selected options
-	grokClient := NewGrokClient(cookie, isReasoning, keepConversation, ignoreThink)
+	grokClient := NewGrokClient(cookie, isReasoning, enableSearch, keepConversation, ignoreThink)
 	log.Printf("Use the cookie with index %d to request Grok 3 Web API", cookieIndex+1)
 	// Send the message to Grok 3 Web API
 	respReader, err := grokClient.sendMessage(message, body.Stream)
@@ -657,7 +679,7 @@ func main() {
 	cookie := flag.String("cookie", "", "Grok cookie (GROK3_COOKIE)")
 	textBeforePrompt = flag.String("textBeforePrompt", "For the data below, entries with the role 'system' are system information, entries with the role 'assistant' are messages you have previously sent, entries with the role 'user' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data.", "Text before the prompt")
 	textAfterPrompt = flag.String("textAfterPrompt", "", "Text after the prompt")
-	keepChat = flag.Bool("keepChat", false, "Don't delete the chat conversation after request")
+	keepChat = flag.Bool("keepChat", false, "Retain the chat conversation")
 	ignoreThinking = flag.Bool("ignoreThinking", false, "Ignore the thinking content while using the reasoning model")
 	httpProxy = flag.String("httpProxy", "", "HTTP/SOCKS5 proxy")
 	port := flag.Uint("port", 8180, "Server port")
