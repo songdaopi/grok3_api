@@ -234,6 +234,7 @@ func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, e
 		FileMimeType: "text/plain",
 		FileName:     uuid.New().String() + ".txt",
 	}
+	log.Println("Uploading the message as a file")
 	resp, err := c.doRequest(http.MethodPost, uploadFileUrl, payload)
 	if err != nil {
 		return nil, err
@@ -588,23 +589,6 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Construct the message to send to Grok 3
-	messageJson := bytes.NewBuffer([]byte{})
-	jsonEncoder := json.NewEncoder(messageJson)
-	jsonEncoder.SetEscapeHTML(false) // Don't escape &, <, and >
-	jsonEncoder.SetIndent("", "")
-	err := jsonEncoder.Encode(messages)
-	if err != nil {
-		log.Println("Error: Encoding JSON failed")
-		http.Error(w, "Error: Encoding JSON failed", http.StatusInternalServerError)
-		return
-	}
-	if messageJson.Len() <= 2 {
-		log.Println("Bad Request: No user message found")
-		http.Error(w, "Bad Request: No user message found", http.StatusBadRequest)
-		return
-	}
-
 	var beforePromptText string
 	var afterPromptText string
 	if body.TextBeforePrompt != "" {
@@ -617,7 +601,15 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	} else {
 		afterPromptText = *textAfterPrompt
 	}
-	message := beforePromptText + messageJson.String() + afterPromptText
+
+	// Construct the message to send to Grok 3
+	var messageBuilder strings.Builder
+	fmt.Fprintln(&messageBuilder, beforePromptText)
+	for _, msg := range messages {
+		fmt.Fprintf(&messageBuilder, "\n[[%s]]\n", msg.Role)
+		messageBuilder.WriteString(msg.Content)
+	}
+	fmt.Fprintf(&messageBuilder, "\n%s", afterPromptText)
 
 	// Determine configuration flags
 	isReasoning := false
@@ -653,7 +645,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	grokClient := NewGrokClient(cookie, isReasoning, enableSearch, uploadMessage, keepConversation, ignoreThink)
 	log.Printf("Use the cookie with index %d to request Grok 3 Web API", cookieIndex+1)
 	// Send the message to Grok 3 Web API
-	respReader, err := grokClient.sendMessage(message, body.Stream)
+	respReader, err := grokClient.sendMessage(messageBuilder.String(), body.Stream)
 	if err != nil {
 		log.Printf("Error: %v", err)
 		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
