@@ -176,7 +176,7 @@ const (
 	completionsPath = "/v1/chat/completions"
 	listModelsPath  = "/v1/models"
 
-	messageCharLimit = 60000
+	messageCharLimit = 40000
 )
 
 // Global configuration variables set.
