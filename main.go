@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -21,18 +23,17 @@ import (
 // GrokClient defines a client for interacting with the Grok 3 Web API.
 // It encapsulates the API endpoints, HTTP headers, and configuration flags.
 type GrokClient struct {
-	newUrl         string            // Endpoint for creating new conversations
 	headers        map[string]string // HTTP headers for API requests
 	isReasoning    bool              // Flag for using reasoning model
 	enableSearch   bool              // Flag for searching in the Web
+	uploadMessage  bool              // Flag for uploading the message as a file
 	keepChat       bool              // Flag to preserve chat history
 	ignoreThinking bool              // Flag to exclude thinking tokens in responses
 }
 
 // NewGrokClient creates a new instance of GrokClient with the provided cookies and configuration flags.
-func NewGrokClient(cookie string, isReasoning bool, enableSearch bool, keepChat bool, ignoreThinking bool) *GrokClient {
+func NewGrokClient(cookie string, isReasoning bool, enableSearch bool, uploadMessage bool, keepChat bool, ignoreThinking bool) *GrokClient {
 	return &GrokClient{
-		newUrl: "https://grok.com/rest/app-chat/conversations/new",
 		headers: map[string]string{
 			"accept":             "*/*",
 			"accept-language":    "en-GB,en;q=0.9",
@@ -52,6 +53,7 @@ func NewGrokClient(cookie string, isReasoning bool, enableSearch bool, keepChat 
 		},
 		isReasoning:    isReasoning,
 		enableSearch:   enableSearch,
+		uploadMessage:  uploadMessage,
 		keepChat:       keepChat,
 		ignoreThinking: ignoreThinking,
 	}
@@ -67,10 +69,15 @@ type ToolOverrides struct {
 }
 
 // preparePayload constructs the request payload for the Grok 3 Web API based on the given message and reasoning flag.
-func (c *GrokClient) preparePayload(message string) map[string]any {
+func (c *GrokClient) preparePayload(message string, fileId string) map[string]any {
 	var toolOverrides any = ToolOverrides{}
 	if c.enableSearch {
 		toolOverrides = map[string]any{}
+	}
+
+	fileAttachments := []string{}
+	if fileId != "" {
+		fileAttachments = []string{fileId}
 	}
 
 	return map[string]any{
@@ -79,7 +86,7 @@ func (c *GrokClient) preparePayload(message string) map[string]any {
 		"enableImageGeneration":     true,
 		"enableImageStreaming":      true,
 		"enableSideBySide":          true,
-		"fileAttachments":           []string{},
+		"fileAttachments":           fileAttachments,
 		"forceConcise":              false,
 		"imageAttachments":          []string{},
 		"imageGenerationCount":      2,
@@ -114,9 +121,10 @@ type RequestBody struct {
 		Content string `json:"content"`
 	} `json:"messages"`
 	Stream           bool   `json:"stream"`
-	GrokCookies      any    `json:"grokCookies,omitempty"`  // A single cookie(string), or a list of cookie([]string)
-	CookieIndex      uint   `json:"cookieIndex,omitempty"`  // Start from 1, 0 means auto-select cookies in turn
-	EnableSearch     int    `json:"enableSearch,omitempty"` // > 0 is true, == 0 is false
+	GrokCookies      any    `json:"grokCookies,omitempty"`   // A single cookie(string), or a list of cookie([]string)
+	CookieIndex      uint   `json:"cookieIndex,omitempty"`   // Start from 1, 0 means auto-select cookies in turn
+	EnableSearch     int    `json:"enableSearch,omitempty"`  // > 0 is true, == 0 is false
+	UploadMessage    int    `json:"uploadMessage,omitempty"` // > 0 is true, == 0 is false
 	TextBeforePrompt string `json:"textBeforePrompt,omitempty"`
 	TextAfterPrompt  string `json:"textAfterPrompt,omitempty"`
 	KeepChat         int    `json:"keepChat,omitempty"`       // > 0 is true, == 0 is false
@@ -146,12 +154,29 @@ type ModelList struct {
 	Data   []ModelData `json:"data"`
 }
 
+// UploadFileRequest represents the request for uploading a file.
+type UploadFileRequest struct {
+	Content      string `json:"content"`
+	FileMimeType string `json:"fileMimeType"`
+	FileName     string `json:"fileName"`
+}
+
+// UploadFileResponse represents the response for uploading a file.
+type UploadFileResponse struct {
+	FileMetadataId string `json:"fileMetadataId"`
+}
+
 const (
+	newChatUrl    = "https://grok.com/rest/app-chat/conversations/new" // Endpoint for creating new conversations
+	uploadFileUrl = "https://grok.com/rest/app-chat/upload-file"       // Endpoint for uploading files
+
 	grok3ModelName          = "grok-3"
 	grok3ReasoningModelName = "grok-3-reasoning"
 
 	completionsPath = "/v1/chat/completions"
 	listModelsPath  = "/v1/models"
+
+	messageCharLimit = 60000
 )
 
 // Global configuration variables set.
@@ -170,16 +195,14 @@ var (
 	}{}
 )
 
-// sendMessage sends a message to the Grok 3 Web API and returns the response body as an io.ReadCloser.
-// If stream is true, it returns the streaming response; otherwise, it reads the entire response.
-func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, error) {
-	payload := c.preparePayload(message)
+// doRequest sends the HTTP request.
+func (c *GrokClient) doRequest(method string, url string, payload any) (*http.Response, error) {
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload: %v", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.newUrl, bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
@@ -199,6 +222,56 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 			return nil, fmt.Errorf("the Grok API error: %d %s", resp.StatusCode, resp.Status)
 		}
 		return nil, fmt.Errorf("the Grok API error: %d %s, response body: %s", resp.StatusCode, resp.Status, string(body))
+	}
+
+	return resp, nil
+}
+
+func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, error) {
+	content := base64.StdEncoding.EncodeToString([]byte(message))
+	payload := UploadFileRequest{
+		Content:      content,
+		FileMimeType: "text/plain",
+		FileName:     uuid.New().String() + ".txt",
+	}
+	resp, err := c.doRequest(http.MethodPost, uploadFileUrl, payload)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("uploading file error: %d %s", resp.StatusCode, resp.Status)
+	}
+	response := &UploadFileResponse{}
+	err = json.Unmarshal(body, response)
+	if err != nil {
+		return nil, fmt.Errorf("parsing json error: %s", string(body))
+	}
+	if response.FileMetadataId == "" {
+		return nil, fmt.Errorf("uploading file error: empty `FileMetadataId`")
+	}
+
+	return response, nil
+}
+
+// sendMessage sends a message to the Grok 3 Web API and returns the response body as an io.ReadCloser.
+// If stream is true, it returns the streaming response; otherwise, it reads the entire response.
+func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, error) {
+	fileId := ""
+	if c.uploadMessage || (len(message) > messageCharLimit && utf8.RuneCountInString(message) > messageCharLimit) {
+		uploadResp, err := c.uploadMessageAsFile(message)
+		if err != nil {
+			return nil, err
+		}
+		fileId = uploadResp.FileMetadataId
+		message = "Follow the instructions in the attached file to respond."
+	}
+
+	payload := c.preparePayload(message, fileId)
+	resp, err := c.doRequest(http.MethodPost, newChatUrl, payload)
+	if err != nil {
+		return nil, err
 	}
 
 	if stream {
@@ -557,6 +630,11 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		enableSearch = true
 	}
 
+	uploadMessage := false
+	if body.UploadMessage > 0 {
+		uploadMessage = true
+	}
+
 	keepConversation := false
 	if body.KeepChat > 0 {
 		keepConversation = true
@@ -572,7 +650,7 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Initialize GrokClient with selected options
-	grokClient := NewGrokClient(cookie, isReasoning, enableSearch, keepConversation, ignoreThink)
+	grokClient := NewGrokClient(cookie, isReasoning, enableSearch, uploadMessage, keepConversation, ignoreThink)
 	log.Printf("Use the cookie with index %d to request Grok 3 Web API", cookieIndex+1)
 	// Send the message to Grok 3 Web API
 	respReader, err := grokClient.sendMessage(message, body.Stream)
