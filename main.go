@@ -177,6 +177,8 @@ const (
 	listModelsPath  = "/v1/models"
 
 	messageCharLimit = 40000
+
+	defaultBeforePromptText = "For the data below, entries with 'system' are system information, entries with 'assistant' are messages you have previously sent, entries with 'user' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data."
 )
 
 // Global configuration variables set.
@@ -707,7 +709,7 @@ func main() {
 	// Define command-line flags
 	apiToken = flag.String("token", "", "Authentication token (GROK3_AUTH_TOKEN)")
 	cookie := flag.String("cookie", "", "Grok cookie (GROK3_COOKIE)")
-	textBeforePrompt = flag.String("textBeforePrompt", "For the data below, entries with the role 'system' are system information, entries with the role 'assistant' are messages you have previously sent, entries with the role 'user' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data.", "Text before the prompt")
+	textBeforePrompt = flag.String("textBeforePrompt", defaultBeforePromptText, "Text before the prompt")
 	textAfterPrompt = flag.String("textAfterPrompt", "", "Text after the prompt")
 	keepChat = flag.Bool("keepChat", false, "Retain the chat conversation")
 	ignoreThinking = flag.Bool("ignoreThinking", false, "Ignore the thinking content while using the reasoning model")
