@@ -255,6 +255,41 @@ type OpenAIChatCompletion struct {
 	Usage   OpenAIChatCompletionUsage    `json:"usage"`
 }
 
+// parseGrok3StreamingJson parses the streaming response from Grok 3.
+func (c *GrokClient) parseGrok3StreamingJson(stream io.Reader, handler func(respToken string)) {
+	// Read and process the streaming response from Grok 3
+	isThinking := false
+	decoder := json.NewDecoder(stream)
+	for {
+		var token ResponseToken
+		err := decoder.Decode(&token)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Printf("Parsing json error: %v", err)
+			break
+		}
+
+		respToken := token.Result.Response.Token
+		// Handle thinking tokens based on configuration
+		if c.ignoreThinking && token.Result.Response.IsThinking {
+			continue
+		} else if token.Result.Response.IsThinking {
+			if !isThinking {
+				respToken = "<think>\n" + respToken
+			}
+			isThinking = true
+		} else if isThinking {
+			respToken = respToken + "\n</think>\n\n"
+			isThinking = false
+		}
+
+		if respToken != "" {
+			handler(respToken)
+		}
+	}
+}
+
 // createOpenAIStreamingResponse returns an HTTP handler that converts the Grok 3 streaming response to OpenAI's streaming format
 // and writes it to the response writer.
 func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.HandlerFunc {
@@ -292,68 +327,26 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 		fmt.Fprintf(w, "data: %s\n\n", mustMarshal(startChunk))
 		flusher.Flush()
 
-		// Read and process the streaming response from Grok 3
-		isThinking := false
-		buffer := make([]byte, 1024)
-		for {
-			n, err := grokStream.Read(buffer)
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				log.Printf("Error reading stream: %v", err)
-				return
-			}
-
-			chunk := string(buffer[:n])
-			lines := strings.SplitSeq(chunk, "\n")
-			for line := range lines {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
-				}
-
-				var token ResponseToken
-				if err := json.Unmarshal([]byte(line), &token); err != nil {
-					continue
-				}
-
-				respToken := token.Result.Response.Token
-				// Handle thinking tokens based on configuration
-				if c.ignoreThinking && token.Result.Response.IsThinking {
-					continue
-				} else if token.Result.Response.IsThinking {
-					if !isThinking {
-						respToken = "<think>\n" + respToken
-					}
-					isThinking = true
-				} else if isThinking {
-					respToken = respToken + "\n</think>\n\n"
-					isThinking = false
-				}
-
-				if respToken != "" {
-					// Send token as a chunk in OpenAI format
-					chunk := OpenAIChatCompletionChunk{
-						ID:      completionID,
-						Object:  "chat.completion.chunk",
-						Created: time.Now().Unix(),
-						Model:   c.getModelName(),
-						Choices: []OpenAIChatCompletionChunkChoice{
-							{
-								Index: 0,
-								Delta: OpenAIChatCompletionMessage{
-									Content: respToken,
-								},
-								FinishReason: "",
-							},
+		c.parseGrok3StreamingJson(grokStream, func(respToken string) {
+			// Send token as a chunk in OpenAI format
+			chunk := OpenAIChatCompletionChunk{
+				ID:      completionID,
+				Object:  "chat.completion.chunk",
+				Created: time.Now().Unix(),
+				Model:   c.getModelName(),
+				Choices: []OpenAIChatCompletionChunkChoice{
+					{
+						Index: 0,
+						Delta: OpenAIChatCompletionMessage{
+							Content: respToken,
 						},
-					}
-					fmt.Fprintf(w, "data: %s\n\n", mustMarshal(chunk))
-					flusher.Flush()
-				}
+						FinishReason: "",
+					},
+				},
 			}
-		}
+			fmt.Fprintf(w, "data: %s\n\n", mustMarshal(chunk))
+			flusher.Flush()
+		})
 
 		// Send the final chunk after streaming ends
 		finalChunk := OpenAIChatCompletionChunk{
@@ -384,42 +377,9 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var fullResponse strings.Builder
-		buf := new(strings.Builder)
-		_, err := io.Copy(buf, grokFull)
-		if err != nil {
-			log.Printf("Reading response error: %v", err)
-			http.Error(w, fmt.Sprintf("Reading response error: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		isThinking := false
-		lines := strings.SplitSeq(buf.String(), "\n")
-		for line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-
-			var token ResponseToken
-			if err := json.Unmarshal([]byte(line), &token); err != nil {
-				continue
-			}
-
-			respToken := token.Result.Response.Token
-			if c.ignoreThinking && token.Result.Response.IsThinking {
-				continue
-			} else if token.Result.Response.IsThinking {
-				if !isThinking {
-					respToken = "<think>\n" + respToken
-				}
-				isThinking = true
-			} else if isThinking {
-				respToken = respToken + "\n</think>\n\n"
-				isThinking = false
-			}
-
+		c.parseGrok3StreamingJson(grokFull, func(respToken string) {
 			fullResponse.WriteString(respToken)
-		}
+		})
 
 		openAIResponse := c.createOpenAIFullResponseBody(fullResponse.String())
 		w.Header().Set("Content-Type", "application/json")
