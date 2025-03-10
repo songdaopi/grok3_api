@@ -178,7 +178,8 @@ const (
 
 	messageCharLimit = 40000
 
-	defaultBeforePromptText = "For the data below, entries with 'system' are system information, entries with 'assistant' are messages you have previously sent, entries with 'user' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data."
+	defaultBeforePromptText    = "For the data below, entries with '[[system]]' are system information, entries with '[[assistant]]' are messages you have previously sent, entries with '[[user]]' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data."
+	defaultUploadMessagePrompt = "Follow the instructions in the attached file to respond."
 )
 
 // Global configuration variables set.
@@ -268,7 +269,7 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 			return nil, err
 		}
 		fileId = uploadResp.FileMetadataId
-		message = "Follow the instructions in the attached file to respond."
+		message = defaultUploadMessagePrompt
 	}
 
 	payload := c.preparePayload(message, fileId)

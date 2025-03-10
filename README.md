@@ -28,7 +28,7 @@ Run this:
 grok3_api -token your_secret_token
 ```
 
-Then the OpenAI-compatible API endpoints can be accessed through `http://127.0.0.1:8180/v1`.
+Then the OpenAI-compatible API endpoints can be accessed through `http://localhost:8180/v1`.
 
 ## Configuration
 
@@ -86,7 +86,7 @@ Please do not abuse or use this tool for commercial purposes. Use it at your own
 
 - [mem0ai/grok3-api: Unofficial Grok 3 API](https://github.com/mem0ai/grok3-api)
 - [RoCry/grok3-api-cf: Grok 3 via API with Cloudflare for free](https://github.com/RoCry/grok3-api-cf/tree/master)
-- Most code was written by Grok 3, so thanks to Grok 3.
+- Most code was written by Grok 3, thanks to Grok 3.
 
 ## License
 
