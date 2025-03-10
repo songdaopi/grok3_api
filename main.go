@@ -176,7 +176,7 @@ const (
 	completionsPath = "/v1/chat/completions"
 	listModelsPath  = "/v1/models"
 
-	messageCharLimit = 40000
+	messageCharsLimit = 50000
 
 	defaultBeforePromptText    = "For the data below, entries with '[[system]]' are system information, entries with '[[assistant]]' are messages you have previously sent, entries with '[[user]]' are messages sent by the user. You need to respond to the user's last message accordingly based on the corresponding data."
 	defaultUploadMessagePrompt = "Follow the instructions in the attached file to respond."
@@ -263,7 +263,7 @@ func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, e
 // If stream is true, it returns the streaming response; otherwise, it reads the entire response.
 func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, error) {
 	fileId := ""
-	if c.uploadMessage || (len(message) > messageCharLimit && utf8.RuneCountInString(message) > messageCharLimit) {
+	if c.uploadMessage || (len(message) > messageCharsLimit && utf8.RuneCountInString(message) > messageCharsLimit) {
 		uploadResp, err := c.uploadMessageAsFile(message)
 		if err != nil {
 			return nil, err
