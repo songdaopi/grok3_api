@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/andybalholm/brotli"
 	"github.com/google/uuid"
 )
 
@@ -36,19 +37,21 @@ func NewGrokClient(cookie string, isReasoning bool, enableSearch bool, uploadMes
 	return &GrokClient{
 		headers: map[string]string{
 			"accept":             "*/*",
-			"accept-language":    "en-GB,en;q=0.9",
+			"accept-encoding":    "gzip, deflate, br, zstd",
+			"accept-language":    "en-US;q=0.9,en;q=0.8",
 			"content-type":       "application/json",
+			"host":               "grok.com",
 			"origin":             "https://grok.com",
+			"dnt":                "1",
 			"priority":           "u=1, i",
 			"referer":            "https://grok.com/",
-			"sec-ch-ua":          `"Not/A)Brand";v="8", "Chromium";v="126", "Brave";v="126"`,
+			"sec-ch-ua":          `"Not:A-Brand";v="24", "Chromium";v="134"`,
 			"sec-ch-ua-mobile":   "?0",
-			"sec-ch-ua-platform": `"macOS"`,
+			"sec-ch-ua-platform": `"Linux"`,
 			"sec-fetch-dest":     "empty",
 			"sec-fetch-mode":     "cors",
 			"sec-fetch-site":     "same-origin",
-			"sec-gpc":            "1",
-			"user-agent":         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+			"user-agent":         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
 			"cookie":             cookie,
 		},
 		isReasoning:    isReasoning,
@@ -190,6 +193,7 @@ var (
 	textAfterPrompt  *string
 	keepChat         *bool
 	ignoreThinking   *bool
+	charsLimit       *uint
 	httpProxy        *string
 	httpClient       = &http.Client{Timeout: 30 * time.Minute}
 	nextCookieIndex  = struct { // Thread-safe cookie rotation
@@ -197,6 +201,11 @@ var (
 		index uint // Start from 0
 	}{}
 )
+
+// decompressBody decompresses the response body.
+func decompressBody(body io.Reader) io.Reader {
+	return brotli.NewReader(body)
+}
 
 // doRequest sends the HTTP request.
 func (c *GrokClient) doRequest(method string, url string, payload any) (*http.Response, error) {
@@ -218,13 +227,16 @@ func (c *GrokClient) doRequest(method string, url string, payload any) (*http.Re
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
+	if resp.Header.Get("content-encoding") != "br" {
+		return nil, fmt.Errorf("unknown response encoding: %s", resp.Header.Get("content-encoding"))
+	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(decompressBody(resp.Body))
 		if err != nil {
-			return nil, fmt.Errorf("the Grok API error: %d %s", resp.StatusCode, resp.Status)
+			return nil, fmt.Errorf("the Grok API error: %s", resp.Status)
 		}
-		return nil, fmt.Errorf("the Grok API error: %d %s, response body: %s", resp.StatusCode, resp.Status, string(body))
+		return nil, fmt.Errorf("the Grok API error: %s, response body: %s", resp.Status, string(body)[:128])
 	}
 
 	return resp, nil
@@ -243,7 +255,7 @@ func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, e
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(decompressBody(resp.Body))
 	if err != nil {
 		return nil, fmt.Errorf("uploading file error: %d %s", resp.StatusCode, resp.Status)
 	}
@@ -261,9 +273,9 @@ func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, e
 
 // sendMessage sends a message to the Grok 3 Web API and returns the response body as an io.ReadCloser.
 // If stream is true, it returns the streaming response; otherwise, it reads the entire response.
-func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, error) {
+func (c *GrokClient) sendMessage(message string) (io.ReadCloser, error) {
 	fileId := ""
-	if c.uploadMessage || (len(message) > messageCharsLimit && utf8.RuneCountInString(message) > messageCharsLimit) {
+	if c.uploadMessage || (len(message) > int(*charsLimit) && utf8.RuneCountInString(message) > int(*charsLimit)) {
 		uploadResp, err := c.uploadMessageAsFile(message)
 		if err != nil {
 			return nil, err
@@ -278,16 +290,7 @@ func (c *GrokClient) sendMessage(message string, stream bool) (io.ReadCloser, er
 		return nil, err
 	}
 
-	if stream {
-		return resp.Body, nil
-	} else {
-		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response body: %v", err)
-		}
-		return io.NopCloser(bytes.NewReader(body)), nil
-	}
+	return resp.Body, nil
 }
 
 type OpenAIChatCompletionMessage struct {
@@ -648,19 +651,20 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	grokClient := NewGrokClient(cookie, isReasoning, enableSearch, uploadMessage, keepConversation, ignoreThink)
 	log.Printf("Use the cookie with index %d to request Grok 3 Web API", cookieIndex+1)
 	// Send the message to Grok 3 Web API
-	respReader, err := grokClient.sendMessage(messageBuilder.String(), body.Stream)
+	respReader, err := grokClient.sendMessage(messageBuilder.String())
 	if err != nil {
 		log.Printf("Error: %v", err)
 		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer respReader.Close()
+	bodyReader := decompressBody(respReader)
 
 	// Handle the response based on streaming option
 	if body.Stream {
-		grokClient.createOpenAIStreamingResponse(respReader)(w, r)
+		grokClient.createOpenAIStreamingResponse(bodyReader)(w, r)
 	} else {
-		grokClient.createOpenAIFullResponse(respReader)(w, r)
+		grokClient.createOpenAIFullResponse(bodyReader)(w, r)
 	}
 }
 
@@ -714,6 +718,7 @@ func main() {
 	textAfterPrompt = flag.String("textAfterPrompt", "", "Text after the prompt")
 	keepChat = flag.Bool("keepChat", false, "Retain the chat conversation")
 	ignoreThinking = flag.Bool("ignoreThinking", false, "Ignore the thinking content while using the reasoning model")
+	charsLimit = flag.Uint("charsLimit", messageCharsLimit, "Upload the message as a file if the count of its characters is greater than this limit")
 	httpProxy = flag.String("httpProxy", "", "HTTP/SOCKS5 proxy")
 	port := flag.Uint("port", 8180, "Server port")
 	flag.Parse()
@@ -726,7 +731,7 @@ func main() {
 	// Set authentication token from flag or environment variable
 	*apiToken = strings.TrimSpace(*apiToken)
 	if *apiToken == "" {
-		*apiToken = os.Getenv("GROK3_AUTH_TOKEN")
+		*apiToken = strings.TrimSpace(os.Getenv("GROK3_AUTH_TOKEN"))
 		if *apiToken == "" {
 			log.Fatal("Authentication token (GROK3_AUTH_TOKEN) is unset")
 		}

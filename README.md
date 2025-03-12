@@ -42,6 +42,7 @@ You can configure this tool using command-line flags, environment variables or t
 - `-textAfterPrompt`: Text to add after the user’s message (default: empty string).
 - `-keepChat`: Retains chat conversations after each request if set.
 - `-ignoreThinking`: Excludes thinking tokens from responses when using the reasoning model.
+- `-charsLimit`: Upload the message as a file if the count of its characters is greater than this limit (default: 50,000).
 - `-httpProxy`: Specifies an HTTP or SOCKS5 proxy URL. The proxy URL should be something like `http://127.0.0.1:1080` or `socks5://127.0.0.1:1080`.
 - `-port`: Sets the server port (default: 8180).
 - `-help`: Prints the help message.
@@ -68,7 +69,7 @@ Request body (JSON):
   "grokCookies": ["cookie1", "cookie2"], // a string for a single cookie, or a list of strings for multiple cookies.
   "cookieIndex": 1, // the index of cookie (starting from 1) to request Grok 3 Web API. If the index is 0, auto selecting cookies in turn (defalut behaviour).
   "enableSearch": 1, // 1 to enable Web searching, 0 to disable (defalut behaviour).
-  "uploadMessage": 1, // 1 to upload the message as a file (for very long message), 0 to only upload the message if the count of characters is greater than 50,000 (defalut behaviour).
+  "uploadMessage": 1, // 1 to upload the message as a file (for very long message), 0 to only upload the message if the count of characters is greater than the count specified by `-charsLimit` (defalut behaviour).
   "textBeforePrompt": "System: You are a helpful assistant.", // text to add before the user’s message. The default text can be viewed by using the `-help` flag.
   "textAfterPrompt": "End of message.", // text to add after the user’s message (default: empty string).
   "keepChat": 1, // 1 to retain this chat conversation, 0 to not retain it (defalut behaviour).
