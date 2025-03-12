@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -203,8 +204,18 @@ var (
 )
 
 // decompressBody decompresses the response body.
-func decompressBody(body io.Reader) io.Reader {
-	return brotli.NewReader(body)
+func decompressBody(resp *http.Response) (io.ReadCloser, error) {
+	switch resp.Header.Get("content-encoding") {
+	case "br":
+		return io.NopCloser(brotli.NewReader(resp.Body)), nil
+	case "gzip":
+		return gzip.NewReader(resp.Body)
+	case "":
+		return resp.Body, nil
+	default:
+		return nil, fmt.Errorf("unknown response encoding: %s", resp.Header.Get("content-encoding"))
+	}
+
 }
 
 // doRequest sends the HTTP request.
@@ -227,12 +238,14 @@ func (c *GrokClient) doRequest(method string, url string, payload any) (*http.Re
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
-	if resp.Header.Get("content-encoding") != "br" {
-		return nil, fmt.Errorf("unknown response encoding: %s", resp.Header.Get("content-encoding"))
-	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		body, err := io.ReadAll(decompressBody(resp.Body))
+		respBody, err := decompressBody(resp)
+		if err != nil {
+			return nil, err
+		}
+		defer respBody.Close()
+		body, err := io.ReadAll(respBody)
 		if err != nil {
 			return nil, fmt.Errorf("the Grok API error: %s", resp.Status)
 		}
@@ -255,7 +268,12 @@ func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, e
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(decompressBody(resp.Body))
+	respBody, err := decompressBody(resp)
+	if err != nil {
+		return nil, err
+	}
+	defer respBody.Close()
+	body, err := io.ReadAll(respBody)
 	if err != nil {
 		return nil, fmt.Errorf("uploading file error: %d %s", resp.StatusCode, resp.Status)
 	}
@@ -273,7 +291,7 @@ func (c *GrokClient) uploadMessageAsFile(message string) (*UploadFileResponse, e
 
 // sendMessage sends a message to the Grok 3 Web API and returns the response body as an io.ReadCloser.
 // If stream is true, it returns the streaming response; otherwise, it reads the entire response.
-func (c *GrokClient) sendMessage(message string) (io.ReadCloser, error) {
+func (c *GrokClient) sendMessage(message string) (*http.Response, error) {
 	fileId := ""
 	if c.uploadMessage || (len(message) > int(*charsLimit) && utf8.RuneCountInString(message) > int(*charsLimit)) {
 		uploadResp, err := c.uploadMessageAsFile(message)
@@ -290,7 +308,7 @@ func (c *GrokClient) sendMessage(message string) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return resp, nil
 }
 
 type OpenAIChatCompletionMessage struct {
@@ -651,21 +669,28 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	grokClient := NewGrokClient(cookie, isReasoning, enableSearch, uploadMessage, keepConversation, ignoreThink)
 	log.Printf("Use the cookie with index %d to request Grok 3 Web API", cookieIndex+1)
 	// Send the message to Grok 3 Web API
-	respReader, err := grokClient.sendMessage(messageBuilder.String())
+	resp, err := grokClient.sendMessage(messageBuilder.String())
 	if err != nil {
 		log.Printf("Error: %v", err)
 		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer respReader.Close()
-	bodyReader := decompressBody(respReader)
+	defer resp.Body.Close()
+	respBody, err := decompressBody(resp)
+	if err != nil {
+		log.Printf("Error: %v", err)
+		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer respBody.Close()
 
 	// Handle the response based on streaming option
 	if body.Stream {
-		grokClient.createOpenAIStreamingResponse(bodyReader)(w, r)
+		grokClient.createOpenAIStreamingResponse(respBody)(w, r)
 	} else {
-		grokClient.createOpenAIFullResponse(bodyReader)(w, r)
+		grokClient.createOpenAIFullResponse(respBody)(w, r)
 	}
+	_, _ = io.ReadAll(respBody)
 }
 
 // listModels handles GET requests to /v1/models, returning a list of available models in OpenAI's format.
