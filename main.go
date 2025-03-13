@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/base64"
@@ -738,7 +739,8 @@ func listModels(w http.ResponseWriter, r *http.Request) {
 func main() {
 	// Define command-line flags
 	apiToken = flag.String("token", "", "Authentication token (GROK3_AUTH_TOKEN)")
-	cookie := flag.String("cookie", "", "Grok cookie (GROK3_COOKIE)")
+	cookie := flag.String("cookie", "", "Grok cookie(s) (GROK3_COOKIE)")
+	cookieFile := flag.String("cookieFile", "", "A text file which contains Grok cookies line by line")
 	textBeforePrompt = flag.String("textBeforePrompt", defaultBeforePromptText, "Text before the prompt")
 	textAfterPrompt = flag.String("textAfterPrompt", "", "Text after the prompt")
 	keepChat = flag.Bool("keepChat", false, "Retain the chat conversation")
@@ -771,6 +773,25 @@ func main() {
 		err := json.Unmarshal([]byte(*cookie), &grokCookies)
 		if err != nil {
 			grokCookies = []string{*cookie}
+		}
+	}
+	// Get cookies from `cookieFile`
+	if *cookieFile != "" {
+		file, err := os.Open(*cookieFile)
+		if err != nil {
+			log.Fatalf("Open file %s error: %v", *cookieFile, err)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			c := strings.TrimSpace(scanner.Text())
+			if c != "" {
+				grokCookies = append(grokCookies, c)
+			}
+		}
+		if err = scanner.Err(); err != nil {
+			log.Fatalf("Reading file %s error: %v", *cookieFile, err)
 		}
 	}
 

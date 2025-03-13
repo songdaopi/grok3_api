@@ -20,7 +20,7 @@ Before you use this tool, ensure you have the following:
 
 ## Basic Usage
 
-The API authentication token is **required** while running this tool. The Grok cookie must be set by the `-cookie` flag or the request body.
+The API authentication token is **required** while running this tool. The Grok cookie must be set by the `-cookie` flag, `-cookieFile` flag or the request body.
 
 Run this:
 
@@ -38,6 +38,7 @@ You can configure this tool using command-line flags, environment variables or t
 
 - `-token`: API authentication token (**required**).
 - `-cookie`: Grok cookie(s) for authentication. Accepts a single cookie or a JSON array of cookies.
+- `-cookieFile`: A text file which contains Grok cookies line by line.
 - `-textBeforePrompt`: Text to add before the user’s message. The default text can be viewed by using the `-help` flag.
 - `-textAfterPrompt`: Text to add after the user’s message (default: empty string).
 - `-keepChat`: Retains chat conversations after each request if set.
