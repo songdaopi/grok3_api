@@ -15,12 +15,12 @@ This is a Go-based tool designed to interact with the Grok 3 Web API, offering a
 
 Before you use this tool, ensure you have the following:
 
-- **Grok Cookie**: Obtain your account's cookie from [grok.com](https://grok.com) by your browser.
+- **Grok Cookie**: Obtain your account's cookie from [grok.com](https://grok.com) by your browser (such as `aaa=bbb; ccc=ddd`).
 - **API Authentication Token**: Prepare a token to secure the OpenAI-compatible API endpoints.
 
 ## Basic Usage
 
-The API authentication token is **required** while running this tool. The Grok cookie must be set by the `-cookie` flag or the request body.
+The API authentication token is **required** while running this tool. The Grok cookie must be set by the `-cookie` flag, `-cookieFile` flag or the request body.
 
 Run this:
 
@@ -28,7 +28,7 @@ Run this:
 grok3_api -token your_secret_token
 ```
 
-Then the OpenAI-compatible API endpoints can be accessed through `http://127.0.0.1:8180/v1`.
+Then the OpenAI-compatible API endpoints can be accessed through `http://localhost:8180/v1`.
 
 ## Configuration
 
@@ -38,10 +38,12 @@ You can configure this tool using command-line flags, environment variables or t
 
 - `-token`: API authentication token (**required**).
 - `-cookie`: Grok cookie(s) for authentication. Accepts a single cookie or a JSON array of cookies.
+- `-cookieFile`: A text file which contains Grok cookies line by line.
 - `-textBeforePrompt`: Text to add before the user’s message. The default text can be viewed by using the `-help` flag.
 - `-textAfterPrompt`: Text to add after the user’s message (default: empty string).
 - `-keepChat`: Retains chat conversations after each request if set.
 - `-ignoreThinking`: Excludes thinking tokens from responses when using the reasoning model.
+- `-charsLimit`: Upload the message as a file if the count of its characters is greater than this limit (default: 50,000).
 - `-httpProxy`: Specifies an HTTP or SOCKS5 proxy URL. The proxy URL should be something like `http://127.0.0.1:1080` or `socks5://127.0.0.1:1080`.
 - `-port`: Sets the server port (default: 8180).
 - `-help`: Prints the help message.
@@ -68,7 +70,7 @@ Request body (JSON):
   "grokCookies": ["cookie1", "cookie2"], // a string for a single cookie, or a list of strings for multiple cookies.
   "cookieIndex": 1, // the index of cookie (starting from 1) to request Grok 3 Web API. If the index is 0, auto selecting cookies in turn (defalut behaviour).
   "enableSearch": 1, // 1 to enable Web searching, 0 to disable (defalut behaviour).
-  "uploadMessage": 1, // 1 to upload the message as a file (for very long message), 0 to only upload the message if the count of characters is greater than 40,000 (defalut behaviour).
+  "uploadMessage": 1, // 1 to upload the message as a file (for very long message), 0 to only upload the message if the count of characters is greater than the count specified by `-charsLimit` (defalut behaviour).
   "textBeforePrompt": "System: You are a helpful assistant.", // text to add before the user’s message. The default text can be viewed by using the `-help` flag.
   "textAfterPrompt": "End of message.", // text to add after the user’s message (default: empty string).
   "keepChat": 1, // 1 to retain this chat conversation, 0 to not retain it (defalut behaviour).
@@ -86,7 +88,7 @@ Please do not abuse or use this tool for commercial purposes. Use it at your own
 
 - [mem0ai/grok3-api: Unofficial Grok 3 API](https://github.com/mem0ai/grok3-api)
 - [RoCry/grok3-api-cf: Grok 3 via API with Cloudflare for free](https://github.com/RoCry/grok3-api-cf/tree/master)
-- Most code was written by Grok 3, so thanks to Grok 3.
+- Most code was written by Grok 3, thanks to Grok 3.
 
 ## License
 
