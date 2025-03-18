@@ -86,7 +86,6 @@ func (c *GrokClient) preparePayload(message string, fileId string) map[string]an
 	}
 
 	return map[string]any{
-		"deepsearchPreset":          "",
 		"disableSearch":             false,
 		"enableImageGeneration":     true,
 		"enableImageStreaming":      true,
