@@ -249,7 +249,7 @@ func (c *GrokClient) doRequest(method string, url string, payload any) (*http.Re
 		if err != nil {
 			return nil, fmt.Errorf("the Grok API error: %s", resp.Status)
 		}
-		return nil, fmt.Errorf("the Grok API error: %s, response body: %s", resp.Status, string(body)[:128])
+		return nil, fmt.Errorf("the Grok API error: %s, response body: %s", resp.Status, string(body)[:min(len(body), 128)])
 	}
 
 	return resp, nil
