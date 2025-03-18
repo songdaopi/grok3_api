@@ -116,11 +116,6 @@ func (c *GrokClient) getModelName() string {
 	}
 }
 
-type UserTextMessage struct {
-	MessageType string `json:"type"`
-	Text        string `json:"text"`
-}
-
 // RequestBody represents the structure of the JSON body expected in POST requests to the /v1/chat/completions endpoint,
 // following the OpenAI API format. It includes fields for model selection, messages, streaming option, and additional specific options.
 type RequestBody struct {
@@ -641,11 +636,17 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 			messageBuilder.WriteString(content)
 		} else if messages, ok := msg.Content.([]any); ok && msg.Role == "user" {
 			for _, message := range messages {
-				if text, ok := message.(UserTextMessage); ok {
-					if text.MessageType == "text" {
-						fmt.Fprintln(&messageBuilder, text.Text)
+				if text, ok := message.(map[string]any); ok {
+					messageType := text["type"]
+					if ty, ok := messageType.(string); ok && ty == "text" {
+						if t, ok := text["text"].(string); ok {
+							fmt.Fprintln(&messageBuilder, t)
+						} else {
+							http.Error(w, logPrintf("Bad Request: Unsupported message type"), http.StatusBadRequest)
+							return
+						}
 					} else {
-						http.Error(w, logPrintf("Bad Request: Unsupported message type: %s", text.MessageType), http.StatusBadRequest)
+						http.Error(w, logPrintf("Bad Request: Unsupported message type"), http.StatusBadRequest)
 						return
 					}
 				} else {
