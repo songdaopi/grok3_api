@@ -116,13 +116,18 @@ func (c *GrokClient) getModelName() string {
 	}
 }
 
+type UserTextMessage struct {
+	MessageType string `json:"type"`
+	Text        string `json:"text"`
+}
+
 // RequestBody represents the structure of the JSON body expected in POST requests to the /v1/chat/completions endpoint,
 // following the OpenAI API format. It includes fields for model selection, messages, streaming option, and additional specific options.
 type RequestBody struct {
 	Model    string `json:"model"`
 	Messages []struct {
 		Role    string `json:"role"`
-		Content string `json:"content"`
+		Content any    `json:"content"`
 	} `json:"messages"`
 	Stream           bool   `json:"stream"`
 	GrokCookies      any    `json:"grokCookies,omitempty"`   // A single cookie(string), or a list of cookie([]string)
@@ -399,8 +404,7 @@ func (c *GrokClient) createOpenAIStreamingResponse(grokStream io.Reader) http.Ha
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			log.Println("Streaming unsupported")
-			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			http.Error(w, logPrintf("Streaming unsupported"), http.StatusInternalServerError)
 			return
 		}
 
@@ -482,8 +486,7 @@ func (c *GrokClient) createOpenAIFullResponse(grokFull io.Reader) http.HandlerFu
 		openAIResponse := c.createOpenAIFullResponseBody(fullResponse.String())
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(openAIResponse); err != nil {
-			log.Printf("Encoding response error: %v", err)
-			http.Error(w, fmt.Sprintf("Encoding response error: %v", err), http.StatusInternalServerError)
+			http.Error(w, logPrintf("Encoding response error: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -523,6 +526,13 @@ func mustMarshal(v any) string {
 	return string(b)
 }
 
+// logPrintf prints the message to the standard logger and returns the string.
+func logPrintf(format string, a ...any) string {
+	log.Printf(format, a...)
+
+	return fmt.Sprintf(format, a...)
+}
+
 // getCookieIndex selects the next cookie index in a round-robin fashion for load balancing or rotation.
 // If cookieIndex is 0 or out of range, it uses the next index in sequence (len must be > 0).
 func getCookieIndex(len int, cookieIndex uint) uint {
@@ -545,37 +555,32 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Request from %s for %s", r.RemoteAddr, completionsPath)
 
 	if r.URL.Path != completionsPath {
-		log.Printf("Requested Path %s Not Found", r.URL.Path)
-		http.Error(w, "Requested Path Not Found", http.StatusNotFound)
+		http.Error(w, logPrintf("Requested Path %s Not Found", r.URL.Path), http.StatusNotFound)
 		return
 	}
 
 	if r.Method != http.MethodPost {
-		log.Printf("Method %s Not Allowed", r.Method)
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		http.Error(w, logPrintf("Method %s Not Allowed", r.Method), http.StatusMethodNotAllowed)
 		return
 	}
 
 	// Authenticate the request
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		log.Println("Unauthorized: Bearer token required")
-		http.Error(w, "Unauthorized: Bearer token required", http.StatusUnauthorized)
+		http.Error(w, logPrintf("Unauthorized: Bearer token required"), http.StatusUnauthorized)
 		return
 	}
 
 	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 	if token != *apiToken {
-		log.Println("Unauthorized: Invalid token")
-		http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+		http.Error(w, logPrintf("Unauthorized: Invalid token"), http.StatusUnauthorized)
 		return
 	}
 
 	// Parse the request body
 	body := RequestBody{EnableSearch: -1, KeepChat: -1, IgnoreThinking: -1}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		log.Println("Bad Request: Invalid JSON")
-		http.Error(w, "Bad Request: Invalid JSON", http.StatusBadRequest)
+		http.Error(w, logPrintf("Bad Request: Invalid JSON"), http.StatusBadRequest)
 		return
 	}
 
@@ -590,6 +595,9 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 				cookieIndex = getCookieIndex(len(list), body.CookieIndex)
 				if ck, ok := list[cookieIndex].(string); ok {
 					cookie = ck
+				} else {
+					http.Error(w, logPrintf("Error: Invalid Grok 3 cookie"), http.StatusBadRequest)
+					return
 				}
 			}
 		}
@@ -601,15 +609,13 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
-		log.Println("Error: No Grok 3 cookie")
-		http.Error(w, "Error: No Grok 3 cookie", http.StatusBadRequest)
+		http.Error(w, logPrintf("Error: No Grok 3 cookie"), http.StatusBadRequest)
 		return
 	}
 
 	messages := body.Messages
 	if len(messages) == 0 {
-		log.Println("Bad Request: No messages provided")
-		http.Error(w, "Bad Request: No messages provided", http.StatusBadRequest)
+		http.Error(w, logPrintf("Bad Request: No messages provided"), http.StatusBadRequest)
 		return
 	}
 
@@ -631,7 +637,26 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(&messageBuilder, beforePromptText)
 	for _, msg := range messages {
 		fmt.Fprintf(&messageBuilder, "\n[[%s]]\n", msg.Role)
-		messageBuilder.WriteString(msg.Content)
+		if content, ok := msg.Content.(string); ok {
+			messageBuilder.WriteString(content)
+		} else if messages, ok := msg.Content.([]any); ok && msg.Role == "user" {
+			for _, message := range messages {
+				if text, ok := message.(UserTextMessage); ok {
+					if text.MessageType == "text" {
+						fmt.Fprintln(&messageBuilder, text.Text)
+					} else {
+						http.Error(w, logPrintf("Bad Request: Unsupported message type: %s", text.MessageType), http.StatusBadRequest)
+						return
+					}
+				} else {
+					http.Error(w, logPrintf("Bad Request: Unsupported message type"), http.StatusBadRequest)
+					return
+				}
+			}
+		} else {
+			http.Error(w, logPrintf("Bad Request: Unsupported message type"), http.StatusBadRequest)
+			return
+		}
 	}
 	fmt.Fprintf(&messageBuilder, "\n%s", afterPromptText)
 
@@ -671,15 +696,13 @@ func handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	// Send the message to Grok 3 Web API
 	resp, err := grokClient.sendMessage(messageBuilder.String())
 	if err != nil {
-		log.Printf("Error: %v", err)
-		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
+		http.Error(w, logPrintf("Error: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 	respBody, err := decompressBody(resp)
 	if err != nil {
-		log.Printf("Error: %v", err)
-		http.Error(w, fmt.Sprintf("Error: %v", err), http.StatusInternalServerError)
+		http.Error(w, logPrintf("Error: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer respBody.Close()
@@ -699,14 +722,12 @@ func listModels(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Request from %s for %s", r.RemoteAddr, listModelsPath)
 
 	if r.URL.Path != listModelsPath {
-		log.Printf("Requested Path %s Not Found", r.URL.Path)
-		http.Error(w, "Requested Path Not Found", http.StatusNotFound)
+		http.Error(w, logPrintf("Requested Path %s Not Found", r.URL.Path), http.StatusNotFound)
 		return
 	}
 
 	if r.Method != http.MethodGet {
-		log.Printf("Method %s Not Allowed", r.Method)
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		http.Error(w, logPrintf("Method %s Not Allowed", r.Method), http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -728,8 +749,7 @@ func listModels(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(list); err != nil {
-		log.Printf("Encoding response error: %v", err)
-		http.Error(w, fmt.Sprintf("Encoding response error: %v", err), http.StatusInternalServerError)
+		http.Error(w, logPrintf("Encoding response error: %v", err), http.StatusInternalServerError)
 		return
 	}
 }
