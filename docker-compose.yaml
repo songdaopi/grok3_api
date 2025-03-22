@@ -1,10 +1,10 @@
 version: '3.8'
 services:
   grok3-proxy:
-    image: ghcr.io/songdaopi/grok3_api:latest
+    image: ghcr.io/supmamamamma/grok3_api:latest
     container_name: grok3-proxy
     ports:
-      - "${PORT:-8180}:8180"  # 默认端口8180，可通过环境变量修改
+      - "8180:8180"  # 默认端口8180，可通过环境变量修改
     environment:
       # 必需的配置
       - GROK3_AUTH_TOKEN=${GROK3_AUTH_TOKEN:-your_token_here}  # 认证令牌
